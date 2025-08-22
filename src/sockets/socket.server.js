@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const userModel = require("../models/user.model");
 const aiService = require("../service/ai.service");
 const messageModel = require("../models/message.model");
+const { createMemory, queryMemory } = require("../service/vector.service");
 
 function initSocketServer(httpServer) {
   const io = new Server(httpServer, {});
@@ -29,42 +30,55 @@ function initSocketServer(httpServer) {
       try {
         console.log(messagePayload);
 
-        // Save user message
-        await messageModel.create({
-          user: socket.user._id,
-          chat: messagePayload.chat,
-          content: messagePayload.content,
+        // Save user message (uncomment if you want persistence)
+        // const userMsg = await messageModel.create({
+        //   user: socket.user._id,
+        //   chat: messagePayload.chat,
+        //   content: messagePayload.content,
+        //   role: "user",
+        // });
+
+        // Create embedding vector for memory
+        const vectors = await aiService.generateVector(messagePayload.content);
+        console.log("Vectors generated", vectors);
+
+        // Fetch last 20 chat messages
+        const chatHistory = (
+          await messageModel
+            .find({ chat: messagePayload.chat })
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .lean()
+        ).reverse();
+
+        // 🔑 Add the current user message to the history
+        chatHistory.push({
           role: "user",
+          content: messagePayload.content,
         });
 
-        // Get chat history and sort by creation time
-        const chatHistory = (await messageModel
-          .find({ chat: messagePayload.chat })
-          .sort({ createdAt: -1 }).limit(20).lean()).reverse();
-
-        // Format messages for Google Generative AI API
-        const formattedHistory = chatHistory.map(item => ({
+        // Format messages for Gemini
+        const formattedHistory = chatHistory.map((item) => ({
           role: item.role === "model" ? "model" : "user",
-          parts: [{ text: item.content }]
+          parts: [{ text: item.content }],
         }));
 
         // Generate AI response
         const response = await aiService.generateResponse(formattedHistory);
 
-        // Save AI response
-        await messageModel.create({
-          user: socket.user._id,
-          chat: messagePayload.chat,
-          content: response,
-          role: "model",
-        });
+        // Save AI response (uncomment if you want persistence)
+        // await messageModel.create({
+        //   user: socket.user._id,
+        //   chat: messagePayload.chat,
+        //   content: response,
+        //   role: "model",
+        // });
 
-        // Send response to client
+        // Send back to client
         socket.emit("ai-response", {
           content: response,
           chat: messagePayload.chat,
         });
-
       } catch (error) {
         console.error("Error in ai-message handler:", error);
         socket.emit("ai-error", {
