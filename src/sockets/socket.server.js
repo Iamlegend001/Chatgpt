@@ -38,9 +38,9 @@ function initSocketServer(httpServer) {
         });
 
         // Get chat history and sort by creation time
-        const chatHistory = await messageModel
+        const chatHistory = (await messageModel
           .find({ chat: messagePayload.chat })
-          .sort({ createdAt: 1 });
+          .sort({ createdAt: -1 }).limit(20).lean()).reverse();
 
         // Format messages for Google Generative AI API
         const formattedHistory = chatHistory.map(item => ({
